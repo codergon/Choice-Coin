@@ -4,9 +4,10 @@
     "frontend"
   ],
   "scripts": {
-    "install-deps": "yarn workspace frontend install",
+    "install-frontend-deps": "yarn workspace frontend install",
     "start-frontend": "yarn workspace frontend start",
     "start-backend": "flask run",
-    "build-frontend": "yarn workspace frontend build"
+    "build-frontend": "yarn workspace frontend build",
+    "install-backend-deps": "pip install -r requirements.txt"
   }
 }
