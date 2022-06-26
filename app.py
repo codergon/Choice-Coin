@@ -92,6 +92,8 @@ class Election(db.Model):
     created_at = db.Column(db.DateTime, default=func.now())
     end_at = db.Column(db.DateTime, nullable=True)
 
+    voters = db.relationship('Voter', backref='election', lazy='dynamic')
+
     is_started = db.Column(db.Boolean, default=False)
     is_finished = db.Column(db.Boolean, default=False)
 
@@ -100,15 +102,15 @@ class Election(db.Model):
         self.description = description
         self.slug = slugify(title) + "-" + secrets.token_hex(3)
         self.wallet_id = wallet_id
-        self._votes = set()
         self.process_image = process_image
         self.algo_per_vote = algo_per_vote
 
     def __repr__(self) -> str:
-        return "<Election wallet={} title={} algo_per_vote={}>".format(
+        return "<Election wallet={} title={} algo_per_vote={} voters={}>".format(
             self.wallet,
             self.title,
             self.algo_per_vote,
+            len(self.voters.all())
         )
 
 
@@ -133,6 +135,25 @@ class Candidate(db.Model):
         self.image = image
         self.address = address
         self.private_key = private_key
+
+
+class Voter(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    election_id = db.Column(db.Integer, db.ForeignKey("elections.id"), nullable=False)
+    address = db.Column(db.String(constants.ADDRESS_LEN), nullable=False)
+    matric_no = db.Column(db.String(40), nullable=False)
+
+    def __init__(self, election_id, address, matric_no) -> None:
+        self.election_id = election_id
+        self.address = address
+        self.matric_no = matric_no
+
+    def __repr__(self) -> str:
+        return "<Voter election={} address={} matric_no={}>".format(
+            self.election_id,
+            self.address,
+            self.matric_no,
+        )
 
 
 ##################################################################################################
@@ -170,6 +191,11 @@ class CandidateSchema(Schema):
         return data
 
 
+class VotersSchema(Schema):
+    address = fields.String(required=True)
+    matric_no = fields.String(required=True)
+
+
 class ElectionSchema(Schema):
     title = fields.Str(required=True)
     slug = fields.Str(dump_only=True)
@@ -179,6 +205,7 @@ class ElectionSchema(Schema):
     process_image = fields.Str(required=False)
 
     candidates = fields.List(fields.Nested(CandidateSchema))
+    voters = fields.List(fields.Nested(VotersSchema))
 
     algo_per_vote = fields.Int(required=True)
 
@@ -433,6 +460,44 @@ def start_election(slug):
     db.session.commit()
 
     return jsonify(status="success", message="Election started successfully!"), 200
+
+
+@app.post("/elections/<slug>/voters")
+def add_voters(slug):
+    request_data = request.get_json()
+    if not request_data:
+        return (
+            jsonify(
+                status="error",
+                message="Set the mimetype header to application/json",
+                data=None,
+            ),
+            400,
+        )
+    parsed_data = VotersSchema().load(request_data)
+    election = Election.query.filter_by(slug=slug).first()
+    if not election:
+        return (
+            jsonify(
+                status="error",
+                message="Election does not exist!",
+                data=None,
+            ),
+            404,
+        )
+
+    if election.is_started and not election.is_finished:
+        voter = Voter(
+            election_id=election.id,
+            address=parsed_data['address'],
+            matric_no=parsed_data['matric_no']
+        )
+        db.session.add(voter)
+        db.session.commit()
+
+        return jsonify(status="success", message="Voter added successfully!"), 200
+
+    return jsonify(status="success", message="You cannot a voter to an election that has not started or has already finished."), 400
 
 
 @app.post("/elections/<slug>/end")
