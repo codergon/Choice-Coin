@@ -35,11 +35,9 @@ cors = CORS(app)
 migrate = Migrate(app, db)
 
 algod_address = "https://node.testnet.algoexplorerapi.io"
-
-algod_address = "https://testnet-algorand.api.purestake.io/ps2"
 algod_token = "fi0QdbiBVl8hsVMCA2SUg6jnQdvAzxY48Zy2G6Yc"
 
-indexer_address = "https://testnet-algorand.api.purestake.io/idx2"
+indexer_address = "https://algoindexer.testnet.algoexplorerapi.io"
 headers = {"x-api-key": algod_token}
 
 algod_client = algod.AlgodClient(algod_token, algod_address, headers)
@@ -91,8 +89,8 @@ class Election(db.Model):
 
     process_image = db.Column(db.LargeBinary, nullable=True)
 
-    is_working = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime, default=func.now())
+    end_at = db.Column(db.DateTime, nullable=True)
 
     is_started = db.Column(db.Boolean, default=False)
     is_finished = db.Column(db.Boolean, default=False)
@@ -188,6 +186,7 @@ class ElectionSchema(Schema):
     is_finished = fields.Bool(dump_only=True)
 
     created_at = fields.DateTime(dump_only=True)
+    end_at = fields.DateTime(dump_only=True)
 
     @post_dump(pass_original=True)
     def add_wallet(self, data, original_data, **kwargs):
@@ -202,6 +201,10 @@ class ElectionSchema(Schema):
             data["process_image"] = image.decode("utf-8")
 
         return data
+
+
+class StartElectionSchema(Schema):
+    end_at = fields.DateTime(required=True)
 
 
 ################################################################################################
@@ -410,9 +413,21 @@ def all_elections():
 @wallet_required
 @is_election_owner
 def start_election(slug):
+    request_data = request.get_json()
+    if not request_data:
+        return (
+            jsonify(
+                status="error",
+                message="Set the mimetype header to application/json",
+                data=None,
+            ),
+            400,
+        )
+    parsed_data = StartElectionSchema().load(request_data)
     election = Election.query.filter_by(slug=slug).first()
 
     election.is_started = True
+    election.end_at = parsed_data['end_at']
     election.is_finished = False
 
     db.session.commit()
@@ -432,6 +447,18 @@ def end_election(slug):
     db.session.commit()
 
     return jsonify(status="success", message="Election started successfully!"), 200
+
+
+@app.post("/elections/<slug>/delete")
+@wallet_required
+@is_election_owner
+def delete_election(slug):
+    election = Election.query.filter_by(slug=slug).first()
+
+    db.session.delete(election)
+    db.session.commit()
+
+    return jsonify(status="success", message="Election deleted successfully!"), 204
 
 
 @app.get("/elections/<slug>/results")
